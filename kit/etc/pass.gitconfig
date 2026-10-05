@@ -1,0 +1,4 @@
+[safe]
+	directory = /srv/agent-git/project.git
+[core]
+	hooksPath = /dev/null

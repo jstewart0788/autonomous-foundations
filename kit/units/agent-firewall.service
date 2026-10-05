@@ -1,0 +1,12 @@
+[Unit]
+Description=Block the agent user from Postgres (own nft table; never flushes other rules)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/agent/firewall.nft
+
+[Install]
+WantedBy=multi-user.target

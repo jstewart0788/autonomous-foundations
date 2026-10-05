@@ -1,0 +1,13 @@
+[Unit]
+Description=courier: forward agent/* branches to GitHub (never merges, never force-pushes)
+
+[Service]
+Type=oneshot
+User=courier
+Group=courier
+ExecStart=/usr/bin/flock -n /var/lib/courier/lock /opt/courier/courier.sh
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/courier /srv/courier/outbox /srv/agent-git /srv/courier-status

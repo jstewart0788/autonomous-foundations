@@ -1,0 +1,10 @@
+# The agent user may not open any connection to Postgres on any address
+# (loopback, a VPN address, or the DB container on the Docker network).
+add table inet agent_guard
+flush table inet agent_guard
+table inet agent_guard {
+  chain output {
+    type filter hook output priority 0; policy accept;
+    meta skuid "agent" tcp dport 5432 counter reject with tcp reset
+  }
+}

@@ -1,0 +1,22 @@
+[Unit]
+Description=agent loop: one isolated claude -p pass per loop-PR event
+After=network-online.target courier.timer
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+# The loop itself: a fixed system PATH and root-owned files only. Each pass runs as its own
+# transient unit (systemd-run in loop.sh) with its own limits and sandbox; none apply here.
+Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/bin/bash /opt/agent-loop/loop.sh
+Restart=always
+RestartSec=30
+MemoryMax=256M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/agent-loop /var/lib/alerts /mnt/backups/.ops/alerts
+
+[Install]
+WantedBy=multi-user.target
