@@ -46,6 +46,8 @@ net() { if command -v timeout >/dev/null; then timeout 60 "$@"; else "$@"; fi; }
 # One state file per branch records the sha last acted on. An unchanged branch is skipped without
 # an API call or an alert, so a stuck branch neither spams ntfy nor burns the GitHub rate limit.
 done_with() { printf '%s\n' "$2" > "$STATE/${1#agent/}"; }
+# git's own error text, with the token removed in case a remote ever echoes it back.
+scrub() { local s=$1; [ -z "${GH_TOKEN:-}" ] || s=${s//"$GH_TOKEN"/[token]}; printf '%s' "$s"; }
 
 if [ -e "$ETC/STOP" ]; then log "STOP present; doing nothing"; exit 0; fi
 
@@ -151,8 +153,13 @@ while read -r name sha <&3; do
     # Explicit refspec, never a wildcard or mirror, never --force.
     # Only a genuine rejection is final; a timeout or a GitHub error is retried next run.
     if ! perr=$(net git "${CRED[@]}" -C "$WORK" push -q "$REMOTE" "refs/courier/${name}:refs/heads/${name}" 2>&1); then
+        perr=$(scrub "$perr")
         if grep -q 'rejected' <<<"$perr"; then
-            refuse "$name" "push rejected (non-fast-forward)"; done_with "$name" "$sha"
+            # The reason is on git's "! [...]" line and the remote's own "remote:" lines; the alert
+            # carries them, because a refusal that does not say why cannot be acted on.
+            why=$(grep -E '^ *! \[|^remote:' <<<"$perr" | tr -s ' \n' ' ' | sed -E 's/^ +| +$//g' | cut -c1-300) || why=""
+            log "push of $name rejected: $perr"
+            refuse "$name" "push rejected: ${why:-git gave no reason}"; done_with "$name" "$sha"
         else
             log "push of $name failed, will retry: $perr"
         fi
