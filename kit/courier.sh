@@ -46,6 +46,12 @@ net() { if command -v timeout >/dev/null; then timeout 60 "$@"; else "$@"; fi; }
 # One state file per branch records the sha last acted on. An unchanged branch is skipped without
 # an API call or an alert, so a stuck branch neither spams ntfy nor burns the GitHub rate limit.
 done_with() { printf '%s\n' "$2" > "$STATE/${1#agent/}"; }
+# "number STATE" for each PR of a head branch. A failed call fails, so that an empty answer can
+# only mean "no PR": a GitHub error read as "none" would reopen what was closed.
+list_prs() {
+    net gh pr list --repo "$REPO" --head "$1" --state all --json number,state \
+        --jq '.[] | "\(.number) \(.state)"'
+}
 # git's own error text, with the token removed in case a remote ever echoes it back.
 scrub() { local s=$1; [ -z "${GH_TOKEN:-}" ] || s=${s//"$GH_TOKEN"/[token]}; printf '%s' "$s"; }
 
@@ -83,17 +89,49 @@ while read -r name sha <&3; do
     if [ "$(cat "$STATE/${name#agent/}" 2>/dev/null)" = "$sha" ]; then continue; fi
 
     # A PR the owner closed stays closed: never push to it again or open a new one for it.
-    prs=$(net gh pr list --repo "$REPO" --head "$name" --state all --json number,state \
-            --jq '.[] | "\(.number) \(.state)"') || { refuse "$name" "cannot list its PRs"; continue; }
+    target=$name late_of=""
+    prs=$(list_prs "$name") || { refuse "$name" "cannot list its PRs"; continue; }
     if [ -n "$prs" ] && ! grep -q ' OPEN$' <<<"$prs"; then
-        log "skipped $name: its PR was closed or merged; not reopening"
-        notify "courier: $name has new commits but its PR was closed or merged; not forwarded"
-        done_with "$name" "$sha"; continue
+        newest=$(sort -n <<<"$prs" | tail -n1)
+        if [[ "$newest" != *" MERGED" ]]; then
+            log "skipped $name: its PR was closed; not reopening"
+            notify "courier: $name has new commits but its PR was closed; not forwarded"
+            done_with "$name" "$sha"; continue
+        fi
+        # Its PR MERGED and the branch moved on: the review bot merges the head it reviewed while
+        # the pass that wrote it is still committing. Those commits go out as a follow-up branch,
+        # <root>-late, -late2 .. -late9, through every check below. The walk stops at one the owner
+        # closed (closed stays closed), and a listing that fails is retried, never read as "no PR".
+        late_of=${newest%% *}
+        root=$(sed -E 's/-late[0-9]?$//' <<<"$name")
+        target="" verdict=""
+        for suffix in late late2 late3 late4 late5 late6 late7 late8 late9; do
+            cand="$root-$suffix"
+            [ "$cand" = "$name" ] && continue
+            if ! cprs=$(list_prs "$cand"); then verdict=retry; break; fi
+            cnew=$(sort -n <<<"$cprs" | tail -n1)
+            case "$cnew" in
+                "") target=$cand prs=""; break ;;
+                *" OPEN") target=$cand prs=$cprs; break ;;
+                *" MERGED") ;;
+                *) verdict=closed; break ;;
+            esac
+        done
+        if [ "$verdict" = retry ]; then log "held $name: cannot list the PRs of $cand"; continue; fi
+        if [ "$verdict" = closed ]; then
+            log "skipped $name: the follow-up PR for $cand was closed; not reopening"
+            notify "courier: $name has commits after #$late_of merged, but the follow-up $cand was closed; not forwarded"
+            done_with "$name" "$sha"; continue
+        fi
+        if [ -z "$target" ] || ! [[ "$target" =~ $NAME_OK ]]; then
+            refuse "$name" "no follow-up branch name left for commits after #$late_of merged"
+            done_with "$name" "$sha"; continue
+        fi
     fi
 
     # One loop PR at a time: a new agent/loop-* branch waits while another loop PR is open and not
     # parked. Held, not refused: it is forwarded on the first run after that PR closes.
-    if [ -z "$prs" ] && [[ "$name" == agent/loop-* ]]; then
+    if [ -z "$prs" ] && [[ "$target" == agent/loop-* ]]; then
         others=$(net gh pr list --repo "$REPO" --state open --json number,headRefName \
                   --jq '.[] | select(.headRefName | startswith("agent/loop-")) | .number') || {
             log "held $name: cannot list open loop PRs"; continue; }
@@ -117,6 +155,8 @@ while read -r name sha <&3; do
     sha=$(git -C "$WORK" rev-parse "refs/courier/${name}")
     base=$(git -C "$WORK" merge-base refs/remotes/origin/main "refs/courier/${name}") || {
         refuse "$name" "no common history with main"; done_with "$name" "$sha"; continue; }
+    # Relies on main taking PRs as merge commits: the merged head is then an ancestor of main.
+    if [ -n "$late_of" ] && [ "$base" = "$sha" ]; then done_with "$name" "$sha"; continue; fi
 
     # Linear history only: git log, format-patch and gitleaks do not reliably show what a merge
     # commit itself changes. The agent rebases instead.
@@ -152,28 +192,45 @@ while read -r name sha <&3; do
 
     # Explicit refspec, never a wildcard or mirror, never --force.
     # Only a genuine rejection is final; a timeout or a GitHub error is retried next run.
-    if ! perr=$(net git "${CRED[@]}" -C "$WORK" push -q "$REMOTE" "refs/courier/${name}:refs/heads/${name}" 2>&1); then
+    if ! perr=$(net git "${CRED[@]}" -C "$WORK" push -q "$REMOTE" "refs/courier/${name}:refs/heads/${target}" 2>&1); then
         perr=$(scrub "$perr")
         if grep -q 'rejected' <<<"$perr"; then
             # The reason is on git's "! [...]" line and the remote's own "remote:" lines; the alert
             # carries them, because a refusal that does not say why cannot be acted on.
             why=$(grep -E '^ *! \[|^remote:' <<<"$perr" | tr -s ' \n' ' ' | sed -E 's/^ +| +$//g' | cut -c1-300) || why=""
-            log "push of $name rejected: $perr"
-            refuse "$name" "push rejected: ${why:-git gave no reason}"; done_with "$name" "$sha"
+            log "push of $name to $target rejected: $perr"
+            refuse "$name" "push to $target rejected: ${why:-git gave no reason}"; done_with "$name" "$sha"
         else
             log "push of $name failed, will retry: $perr"
         fi
         continue
     fi
-    log "pushed $name @ ${sha:0:12}"
+    if [ -n "$late_of" ]; then
+        log "forwarded late commits of $name as $target @ ${sha:0:12} (after #$late_of merged)"
+    else
+        log "pushed $name @ ${sha:0:12}"
+    fi
 
     if [ -z "$prs" ]; then
         subject=$(git -C "$WORK" log -1 --format=%s "refs/courier/${name}")
         body=$(git -C "$WORK" log --format='- %s' "${base}..refs/courier/${name}")
-        if net gh pr create --repo "$REPO" --base main --head "$name" --title "$subject" --body "$body" >/dev/null; then
-            log "opened PR for $name"
+        [ -z "$late_of" ] || body="Commits pushed to $name after #$late_of merged."$'\n\n'"$body"
+        if net gh pr create --repo "$REPO" --base main --head "$target" --title "$subject" --body "$body" >/dev/null; then
+            log "opened PR for $target"
         else
             refuse "$name" "gh pr create failed"; continue
+        fi
+    fi
+    # The loop tells a fix pass to commit on its PR's branch, and a pass clones LOCAL, so a
+    # follow-up branch has to exist there as well. Never forced: a local branch of that name the
+    # agent made itself is its own work, and a refusal here is final, not retried every minute.
+    if [ -n "$late_of" ]; then
+        if lerr=$(git -C "$WORK" push -q "$LOCAL" "refs/courier/${name}:refs/heads/${target}" 2>&1); then
+            done_with "$target" "$sha"
+        elif grep -q 'rejected' <<<"$lerr"; then
+            refuse "$name" "$target is on GitHub, but the local repo holds a different $target"
+        else
+            log "local copy of $target failed, will retry: $lerr"; continue
         fi
     fi
     done_with "$name" "$sha"

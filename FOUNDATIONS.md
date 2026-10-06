@@ -66,7 +66,8 @@ Build them in this order. Each one is useless or dangerous without the ones befo
   - the token is passed to git through a credential helper, never on a command line, where `/proc` exposes it;
   - every network call has a timeout;
   - state files record the last SHA acted on for each branch, so a stuck branch isn't retried or alerted on every minute;
-  - a closed PR stays closed;
+  - a PR the owner closed stays closed;
+  - commits that land after a PR **merged** are not dropped: they go out as a follow-up branch (`<branch>-late`) through every check, with their own PR, and the follow-up branch is written to the local repo so the agent can keep working on it;
   - a refusal says why: a rejected push carries the code host's own reason (git's `! [...]` line and any `remote:` lines, token scrubbed) in the alert, and the full output in the log.
 - Test it with a harness that runs the real script against a fake code host, plus one mutant per rule.
 - **Edit it live only atomically:** write `courier.sh.new`, check it with `bash -n`, then `mv` it into place, keeping a dated backup. A half-written script ran once from its timer and failed mid-file.
@@ -261,15 +262,16 @@ Each lesson cost something real to learn.
 28. **CI spend caps stop deploys silently.** When the code host's Actions budget ran out, merges kept landing and nothing deployed. Watch deploy lag, not just merges.
 29. **One-off scripts that rewrite config are landmines.** Delete them, or quarantine them, once their job is done.
 30. **An alert must carry the cause, not a guess at it.** The courier labelled every rejected push "non-fast-forward" because it matched only the word `rejected`. A fix branch that had never existed on the code host was reported that way, the real reason was never recorded, and a refusal is final for that commit, so the fix stalled with nothing to act on. Pass the tool's own error text through; a label is a claim and needs the same evidence as any other.
+31. **A merge can land while the author is still working.** The gate merges the head it reviewed; an agent that keeps polishing pushes a commit seconds later, and a courier that refuses a merged PR drops it. Holding the branch until the pass ends looked like the fix and was wrong: the agent iterates with the reviewer inside one pass, so it would have waited for a PR that never appears. Read how a pass actually runs before adding a hold. What works is to forward late commits as a follow-up PR, and to tell "merged" apart from "closed by the owner", which still stays closed.
 
 ### Process and people
 
-31. **Over-engineering is the default failure.** Every design got simpler under a simplifier with veto power, which pushed for one fixed unit name, no protocol markers, and a set-difference instead of hashes. Ask "what's the smallest mechanism that enforces this?" before adding a component.
-32. **Research the field before designing.** The proven pattern (a fresh headless run per unit, state on disk, harness-enforced caps, work in progress limited to one) was already documented. Designing from scratch cost rounds.
-33. **Independent reviewers need identical, fixed briefs.** The orchestrator shouldn't frame what it hopes to hear. Give every reviewer the same brief with only the role differing, a failure scenario required for anything blocking, and the previous round's findings listed so fixes get checked.
-34. **Validate by driving the real thing.** Every serious defect was found by running it: the safe.directory refusal, the private `/tmp` hiding a marker, a stale status file, a counter file colliding with a directory name. None of them showed up by reading the code.
-35. **Say who does what, precisely.** An assistant session isn't an operator. Escalation goes to the human's phone. One-time human actions (a merge that removes their key, a browser login, provisioning a secret) are named and batched.
-36. **When the human says "don't ask me", build the thing that makes asking unnecessary.** Decisions move to the agents with a recorded rationale. The human keeps the stop switch, spending money and parked items.
+32. **Over-engineering is the default failure.** Every design got simpler under a simplifier with veto power, which pushed for one fixed unit name, no protocol markers, and a set-difference instead of hashes. Ask "what's the smallest mechanism that enforces this?" before adding a component.
+33. **Research the field before designing.** The proven pattern (a fresh headless run per unit, state on disk, harness-enforced caps, work in progress limited to one) was already documented. Designing from scratch cost rounds.
+34. **Independent reviewers need identical, fixed briefs.** The orchestrator shouldn't frame what it hopes to hear. Give every reviewer the same brief with only the role differing, a failure scenario required for anything blocking, and the previous round's findings listed so fixes get checked.
+35. **Validate by driving the real thing.** Every serious defect was found by running it: the safe.directory refusal, the private `/tmp` hiding a marker, a stale status file, a counter file colliding with a directory name. None of them showed up by reading the code.
+36. **Say who does what, precisely.** An assistant session isn't an operator. Escalation goes to the human's phone. One-time human actions (a merge that removes their key, a browser login, provisioning a secret) are named and batched.
+37. **When the human says "don't ask me", build the thing that makes asking unnecessary.** Decisions move to the agents with a recorded rationale. The human keeps the stop switch, spending money and parked items.
 
 ---
 
