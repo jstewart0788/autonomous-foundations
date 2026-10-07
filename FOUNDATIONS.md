@@ -244,7 +244,9 @@ Give the system its own accounts from the start, so its usage, credentials and f
 - Runs for main queue behind each other, so the deploy of an older merge can start after a newer merge. Judge "was this change deployed" by the run **created for it**, never by which deploy started later.
 - A pull request can change which runner a job uses, because the workflow file comes from the PR head and a label is not a boundary. The control is the courier refusing every change to CI config (§2).
 - Once a monitor hands a slot its next runner within seconds, a slot is never idle, so the root-side probe needs the monitor stopped first.
-- Unattended security updates should reboot only in a fixed window. A job running then fails as "runner lost".
+- **A security update must not reboot a machine under a running job.** A killed test job fails its PR or stalls a deploy, and nothing re-runs it. Let the updater install but not reboot. At a fixed time a root script checks for a pending reboot and drains first: no slot is handed a new runner, idle slots are stopped, running jobs finish, then it reboots. It can't be starved, because nothing new starts during a drain and every job has a time limit; cap the wait anyway. A job that arrives meanwhile waits in the code host's queue.
+- The monitor has to allow for that drain, or every planned reboot pages the human: a draining machine's labels are not an outage for a bounded time, and "the other machine did not answer" is reported after minutes of silence, not after one miss.
+- The code host refuses to delete a runner registration it still thinks is in a session, for about a minute after a listener is stopped. A refused delete must be logged and skipped, not allowed to end the cycle before replacements are issued.
 
 ---
 
@@ -335,6 +337,11 @@ Each lesson cost something real to learn.
 45. **Replay a new alert over real history before trusting it.** Each rule was run against the code host's actual records at moments before, during and after two real incidents, and swept across a normal period. That found the rule above, and it is what turns a threshold from a guess into a measurement.
 46. **Two writers that both allocate identifiers will collide.** The operator and the loop each picked "the next free number" for a work file and twice chose the same one. Allocate from one place, or make the collision a failed check rather than a silent overwrite.
 47. **A new probe's failures are a mix of its own bugs and real ones.** The isolation probe's first red was its own (a file search that exits non-zero on a denied directory, with no message). The next two were real: containers that could not start, and a setting that broke service containers. Give the probe a trap that names the failing line, and read each failure before deciding which kind it is.
+48. **A fixture has to be the size of the real thing.** The monitor's tests fed it API answers of a few dozen bytes. The real answers are hundreds of kilobytes; the script passed one as a command argument, and the operating system refused once it grew past the per-argument limit. Every cycle then died after doing its first job and before sending its heartbeat. Twenty-nine mutants had all gone red, because mutation testing shows the tests notice the code changing and says nothing about inputs they never supply. Ask what the real payload looks like before writing the fake.
+49. **Give every remote call a test in which it fails.** No test ever made a fetch fail, so a path where a failed fetch read as "nothing found" shipped, and the heartbeat was still sent for a minute in which nothing had been checked. In a shell, a command substitution does not inherit exit-on-error: say `|| return 1` at each fallible step and call the function as a plain assignment.
+50. **The silence alarm earns its keep.** The monitor pings liveness only after every check has run. When it crashed, nothing in it could have alerted; the missing ping did, within its grace period. Put the heartbeat last, behind everything it vouches for.
+51. **Your own maintenance is the most common cause of a page.** A planned one-minute reboot paged the human, who had to ask what it was. Before taking down anything a monitor watches, say so and name the alert that may fire; better, make a planned outage of that length not fire it.
+52. **Clear out what you created, and look before you do.** Throwaway branches held the only copy of a workflow the rebuild procedure depends on. It was found by reading what each branch contained that the main branch did not, immediately before deleting it.
 
 ---
 
@@ -356,7 +363,8 @@ Each lesson cost something real to learn.
 - [ ] Settings that must hold (attribution, hooks, permissions) are proven with a throwaway run, not trusted from prose.
 - [ ] A refused CI start, a change to main with no deploy, and a job stuck waiting for a runner each alert a phone.
 - [ ] Every job reports what it produced, and each external data feed has its own check.
-- [ ] If CI runs on your own machines (§10): both probes pass, deploy and merge are pinned to hosted runners by a test, and no secret appears in any process's arguments.
+- [ ] If CI runs on your own machines (§10): both probes pass, deploy and merge are pinned to hosted runners by a test, no secret appears in any process's arguments, and a machine reboots only when idle.
+- [ ] Every remote call a monitor makes has a test in which it fails, and its fixtures are as large as the real answers.
 
 ## Part 5 — Known gaps (be honest about them)
 
@@ -366,6 +374,6 @@ Each lesson cost something real to learn.
 - **Egress:** a pass can reach the internet, so a hijacked pass could exfiltrate its token. Consider an egress allowlist.
 - **Usage visibility:** a headless token may not be able to read the subscription's usage percentage. The human reads it with `/usage` while signed into the agent account.
 - **Version the host scripts.** In the reference system, `loop.sh`, `pass.sh` and `courier.sh` lived only on the host, so a disk loss would have erased them. Keep them in the project repo with an installer from day one.
-- **Own runners (§10), if you use them:** two slots on one machine share `/dev/shm` and can read each other's process arguments; one job of each kind runs at a time, so throughput is bounded by the slowest job; the alert thresholds were set from one day of traffic and should be re-measured after a busy week.
+- **Own runners (§10), if you use them:** two slots on one machine share `/dev/shm` and can read each other's process arguments; one job of each kind runs at a time, so throughput is bounded by the slowest job; the alert thresholds were set from one day of traffic and should be re-measured after a busy week; the drain-before-reboot path has only been exercised with idle slots.
 - **Transient retries are silent.** A push that keeps hitting a code-host fault is retried every minute with no alert. Add a count and alert past a limit.
 - **The usage-limit pause had not yet been exercised live** in the reference system when this was written. Check its first real occurrence in the loop's log.
