@@ -1,0 +1,9 @@
+#!/bin/bash
+# Fake git: a push to the code-host stand-in fails with the text in $FAKE/push_error when that
+# file exists. Everything else is the real git, whose path the harness passes in.
+if [ -e "$FAKE/push_error" ]; then
+  push=""; remote=""
+  for a in "$@"; do [ "$a" = push ] && push=1; [ "$a" = "$COURIER_REMOTE" ] && remote=1; done
+  if [ -n "$push" ] && [ -n "$remote" ]; then cat "$FAKE/push_error" >&2; exit 1; fi
+fi
+exec "$REAL_GIT" "$@"

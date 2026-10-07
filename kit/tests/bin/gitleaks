@@ -1,0 +1,4 @@
+#!/bin/bash
+case " $* " in *" --help "*|*" version "*) exit 0 ;; esac
+[ "$1" = git ] && [ -e "$FAKE/leak" ] && exit 1
+exit 0

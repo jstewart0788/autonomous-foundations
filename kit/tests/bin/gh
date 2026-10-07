@@ -1,0 +1,27 @@
+#!/bin/bash
+# Fake gh: PR state lives in $FAKE/prs as "branch number STATE" lines.
+sub="$1 $2"; head=""; body=""; state=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --head) head=$2; shift ;;
+    --body) body=$2; shift ;;
+    --state) state=$2; shift ;;
+  esac
+  shift
+done
+case "$sub" in
+  "pr list")
+    if [ -n "$head" ]; then
+      grep -qx "$head" "$FAKE/fail_head" 2>/dev/null && exit 1
+      awk -v h="$head" '$1==h {print $2" "$3}' "$FAKE/prs" 2>/dev/null
+    elif [ "$state" = open ]; then
+      awk '$3=="OPEN" && $1 ~ /^agent\/loop-/ {print $2}' "$FAKE/prs" 2>/dev/null
+    else echo '[]'; fi
+    exit 0 ;;
+  "pr create")
+    n=$(( $(awk '{print $2}' "$FAKE/prs" 2>/dev/null | sort -n | tail -1) + 1 ))
+    echo "$head $n OPEN" >> "$FAKE/prs"
+    printf '%s\n---\n' "$body" >> "$FAKE/bodies"
+    exit 0 ;;
+  *) exit 1 ;;
+esac

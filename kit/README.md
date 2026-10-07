@@ -11,6 +11,8 @@ These are working templates for the host side of the system: the driver loop, th
 | `loop.sh` | `/opt/agent-loop/loop.sh` | The driver: waits for events on loop PRs, runs one isolated pass per event, and enforces every cap and outcome (FOUNDATIONS §6) |
 | `pass.sh` | `/opt/agent-loop/pass.sh` | One pass, as the agent user in a transient unit: a fresh clone at the exact main SHA, an empty home, hooks off, then `claude -p` |
 | `courier.sh` | `/opt/courier/courier.sh` | The only holder of the code-host token: forwards `agent/*` branches, opens PRs, and writes the status files the loop and any reporting read (FOUNDATIONS §2) |
+| `tests/harness.py`, `tests/bin/` | not installed | Runs `courier.sh` as shipped against a fake code host and a local bare repo, one scenario per rule. `python3 kit/tests/harness.py` |
+| `tests/mutants.py` | not installed | Breaks `courier.sh` one rule at a time and fails unless the harness notices each. Run both before installing a changed courier |
 | `etc/conduct.md` | `/etc/agent/conduct.md` | Rules appended to every pass's system prompt. Root-owned, so a pass can't change it |
 | `etc/loop.conf` | `/etc/agent/loop.conf` | Knobs the loop re-reads every cycle: `DAILY_PASSES`, `WEEKLY_COST` |
 | `etc/pass.gitconfig` | `/etc/agent/pass.gitconfig` | The pass's only git config: `safe.directory` for the bare repo, hooks off |
@@ -46,5 +48,4 @@ They're versioned and tested with the code they guard. FOUNDATIONS describes eac
 - **Remote Control session units,** if the owner wants a live session on the host.
 - **The Reports page (§7):** daily report collector, health snapshot, optional AI summary, and the read-only page.
 - **CI runner machines (§10, optional):** the installer, the per-slot unit with its prepare, run and wipe scripts, the config receiver, the gate machine's monitor, both probes, and a test that pins every job's machine.
-- **The courier's harness (§2):** a fake code host and one scenario per rule, kept beside the script it tests.
 - **A project runbook** for the host: where each piece lives, its knobs, and its operating procedures.

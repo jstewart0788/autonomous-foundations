@@ -74,7 +74,7 @@ Build the nine in this order. Each one is useless or dangerous without the ones 
   - a refusal says why: a rejected push carries the code host's own reason (git's `! [...]` line and any `remote:` lines, token scrubbed) in the alert, and the full output in the log;
   - **the code host's own faults are retried, not refused.** A server error on a push comes back from git as `! [remote rejected] … (Internal Server Error)`. Only a rejection whose reason is not a server fault is final; the rest are tried again on the next run without an alert.
 - Test it with a harness that runs the real script against a fake code host, plus one mutant per rule. Feed it the error text the code host really sent, saved from the incident, and include a branch that only changes which runner a CI job uses: it must end in the outbox (§10).
-- **Keep the harness in the repo next to the script.** In the reference system it lived in a scratch directory, outside version control.
+- **Keep the harness in the repo next to the script.** In the reference system it first lived in a scratch directory, outside version control. It is now in `kit/tests/`, with a script that breaks the courier one rule at a time and fails unless the harness notices.
 - **Edit it live only atomically:** write `courier.sh.new`, check it with `bash -n`, then `mv` it into place, keeping a dated backup. A half-written script ran once from its timer and failed mid-file.
 
 #### 3. The review gate: CI decides what merges
@@ -365,7 +365,7 @@ Each lesson cost something real to learn.
 - **Branch naming by prompt:** a pass that ignores its branch prefix creates an untracked PR. It's still reviewed, and bounded by the daily cap.
 - **Egress:** a pass can reach the internet, so a hijacked pass could exfiltrate its token. Consider an egress allowlist.
 - **Usage visibility:** a headless token may not be able to read the subscription's usage percentage. The human reads it with `/usage` while signed into the agent account.
-- **Version the host scripts.** In the reference system, `loop.sh`, `pass.sh` and `courier.sh` lived only on the host, so a disk loss would have erased them. Keep them in the project repo with an installer from day one. The same goes for the courier's test harness.
+- **Version the host scripts.** In the reference system, `loop.sh`, `pass.sh` and `courier.sh` lived only on the host, so a disk loss would have erased them. Keep them in the project repo with an installer from day one.
 - **Own runners (§10), if you use them:** two slots on one machine share `/dev/shm` and can read each other's process arguments; one job of each kind runs at a time, so throughput is bounded by the slowest job; the alert thresholds were set from one day of traffic and should be re-measured after a busy week.
 - **Transient retries are silent.** A push that keeps hitting a code-host fault is retried every minute with no alert. Add a count and alert past a limit.
 - **The usage-limit pause had not yet been exercised live** in the reference system when this was written. Check its first real occurrence in the loop's log.
