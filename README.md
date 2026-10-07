@@ -3,7 +3,7 @@
 A blueprint for an AI coding agent that works a codebase continuously, merges its own reviewed changes and deploys them, with no human in the loop. It is distilled from building and running one in production.
 
 - **[FOUNDATIONS.md](FOUNDATIONS.md)** covers:
-  - the nine components;
+  - the nine components, and an optional tenth: running CI on your own machines to cut the metered-minutes bill (not required);
   - a phase-by-phase rebuild roadmap, each phase with an exit test;
   - lessons learned;
   - a checklist before going unattended;

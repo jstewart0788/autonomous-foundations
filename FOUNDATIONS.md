@@ -2,7 +2,7 @@
 
 A blueprint for an AI coding agent that works a real codebase continuously, merges its own reviewed changes and deploys them, with no human in the loop. It is distilled from building one end to end on a production host in late 2026, and from running it unattended. Nothing here is specific to that project. Where a concrete tool is named, it is what was used and proved, not the only option.
 
-**Start a new project from here.** Read Parts 1 and 2. Then copy `kit/` (the host-side scripts and units), build the repo-side pieces listed in `kit/README.md`, and follow the rebuild roadmap phase by phase. Last updated 2026-10-05.
+**Start a new project from here.** Read Parts 1 and 2. Then copy `kit/` (the host-side scripts and units), build the repo-side pieces listed in `kit/README.md`, and follow the rebuild roadmap phase by phase. Last updated 2026-10-07.
 
 The system rests on one idea. **An agent cannot be trusted by instruction, only by mechanism.** Every property that matters has to be enforced by something the agent cannot edit, and proven by breaking it on purpose.
 
@@ -32,6 +32,9 @@ The system rests on one idea. **An agent cannot be trusted by instruction, only 
                                               review → classify tier (from base)
                                               → Tier 2: second independent review
                                               → merge → deploy
+                                              (optional §10: the test and review
+                                               jobs run on your own runner
+                                               machines; merge and deploy never do)
                                      │
                                      └── the review/merge is the next event
             Alerts: liveness pings + push notifications to the human's phone
@@ -39,9 +42,9 @@ The system rests on one idea. **An agent cannot be trusted by instruction, only 
                           written by root jobs the agent can't touch
 ```
 
-### The nine components
+### The nine components, and one optional one
 
-Build them in this order. Each one is useless or dangerous without the ones before it.
+Build the nine in this order. Each one is useless or dangerous without the ones before it. The tenth, running CI on your own machines, saves money and is not required: the system is complete without it.
 
 #### 1. Containment: the agent's identity
 
@@ -68,8 +71,10 @@ Build them in this order. Each one is useless or dangerous without the ones befo
   - state files record the last SHA acted on for each branch, so a stuck branch isn't retried or alerted on every minute;
   - a PR the owner closed stays closed;
   - commits that land after a PR **merged** are not dropped: they go out as a follow-up branch (`<branch>-late`) through every check, with their own PR, and the follow-up branch is written to the local repo so the agent can keep working on it;
-  - a refusal says why: a rejected push carries the code host's own reason (git's `! [...]` line and any `remote:` lines, token scrubbed) in the alert, and the full output in the log.
-- Test it with a harness that runs the real script against a fake code host, plus one mutant per rule.
+  - a refusal says why: a rejected push carries the code host's own reason (git's `! [...]` line and any `remote:` lines, token scrubbed) in the alert, and the full output in the log;
+  - **the code host's own faults are retried, not refused.** A server error on a push comes back from git as `! [remote rejected] … (Internal Server Error)`. Only a rejection whose reason is not a server fault is final; the rest are tried again on the next run without an alert.
+- Test it with a harness that runs the real script against a fake code host, plus one mutant per rule. Feed it the error text the code host really sent, saved from the incident, and include a branch that only changes which runner a CI job uses: it must end in the outbox (§10).
+- **Keep the harness in the repo next to the script.** In the reference system it lived in a scratch directory, outside version control.
 - **Edit it live only atomically:** write `courier.sh.new`, check it with `bash -n`, then `mv` it into place, keeping a dated backup. A half-written script ran once from its timer and failed mid-file.
 
 #### 3. The review gate: CI decides what merges
@@ -161,6 +166,15 @@ Build them in this order. Each one is useless or dangerous without the ones befo
   - repeated failures.
 
   Cap alert priority below "urgent", so the phone's Do Not Disturb still works at night.
+- **Watch the pipeline after the merge, not just the merge.** Three things read as "fine" from the PR list and are not:
+  - a CI job that was **refused a start** (an exhausted CI budget refuses jobs; it doesn't queue them);
+  - a change to main with **no completed deploy** some minutes later;
+  - a job **waiting for a runner** longer than a set time.
+
+  One alert per incident for each, cleared when the condition clears, and the marker written only when the alert was actually sent, so a failed send is retried.
+- **Watch what a job produced, not whether it exited 0.** A scan ran green every day and confirmed nothing for days, because an upstream data feed had stopped returning one field. Report on outputs (rows written, signals produced, last successful fetch per feed), and give each external feed its own check.
+- **Match severity to how soon someone must act.** A credential expiring in two days is a warning; red is for one day or less. A rule that pages on any failed run that day pages for a failure that was already retried and fixed: judge a day by its **last finished run**.
+- **One named alert may be urgent.** Everything stays below "urgent" except the few conditions the human has said should wake them. Give the drain a narrow rule for those (right queue, written by root, naming that one check) and test that nothing else can reach that priority.
 - **Replace any LLM-driven alert delivery** with a deterministic drain script. An alerting path must not depend on a model session staying alive.
 - **Keep each pass's transcript.** It's the only record of what an unattended agent actually ran.
 - **A Reports page the human actually reads**, built by the operator, never by the loop. The loop is what the report describes, and it has no access to host state.
@@ -197,6 +211,41 @@ Give the system its own accounts from the start, so its usage, credentials and f
   - Pipe the issued token straight from the pane into a root-only setter that rejects anything not shaped like a token, keeps a backup and swaps the file atomically. It never reaches a terminal, a clipboard or a chat.
 - **Verify the account after every login.** The link is approved as whichever account the browser is signed into. Read `oauthAccount.organizationUuid` in the host's `~/.claude.json`, and make one real call with the token, with an empty home directory so nothing else can authenticate it.
 
+#### 10. Optional: CI on your own machines
+
+**Not required.** Everything above works on the code host's metered runners. This is about money: in the reference system the test and review jobs used about 1,700 billed minutes a day, and when the account's spending limit ran out every job was refused, so nothing was reviewed, merged or deployed until a human raised it. Two small rented machines run the same jobs for a fixed monthly price, and jobs on your own runners are not billed. Do this once the bill or the budget ceiling is the thing in your way, not before.
+
+- **What moves and what never does.** Test jobs and the review jobs move. **Deploy stays hosted** (it holds every production secret) and **merge stays hosted** (it holds the only write token and runs for seconds). Pin every job's machine in one test, as a whole table, with a second assertion that deploy and merge are hosted. Then moving a job is a deliberate edit and pointing deploy at your own machine is a red test.
+- **Two machines, neither the production host, neither on its private network.**
+  - A **test machine** runs pull-request code. It holds no credential between jobs.
+  - A **gate machine** runs the review jobs and holds the one code-host credential used to register runners. It refuses every inbound connection from the test machine.
+- **A slot is one unprivileged user, one rootless container daemon and one systemd unit,** with a private `/tmp`. There is no rootful container daemon and nobody is in its group. The unit's life is one job:
+  1. root wipes the slot, then waits for a single-use runner config in a root-only directory;
+  2. root builds the slot's home afresh and hands the config over;
+  3. the slot's user starts its daemon and one runner, which takes exactly one job and exits;
+  4. root wipes the slot again.
+- **The wipe covers the uid and its subordinate id range.** A rootless container daemon stores layers and container files under the subordinate range, not the user's uid. Kill every process and delete every file owned by either, on every writable filesystem, and remove the daemon's data directory by path.
+- **Single-use runner configs only.** No runner registration persists. The gate machine asks the code host for one config per slot and delivers it: locally into the drop directory, or to the test machine over SSH with a key whose **only** permitted command there receives a config. Port forwarding, a shell and any other command are refused, and the test machine cannot open a connection back.
+- **Nothing secret on a command line.** Slots on one machine can read each other's process arguments (hiding them breaks the runner, below). The registration token and the runner configs travel on stdin, in files and in the environment.
+- **A per-minute monitor on the gate machine** keeps a runner registered per slot, removes registrations that never came online, raises the three pipeline alerts from §7 plus disk and "a newer runner has been released", and pings liveness only when every label has a runner online. If the gate machine dies, the missing ping is the alarm.
+- **Prove it with two probes before moving any job.**
+  - A **job-side probe** runs on every slot of a machine at the same time. It fails if the job is root, can use sudo or cron, can see a container socket other than its own, can read the other slot's home, temp files or process environments, or cannot reach its own container on localhost. The second slot waits for the first to be wiped and checks its own files and container survived.
+  - A **root-side probe** fails if any process or file owned by a slot's ids exists anywhere while the slot is idle. Plant a file and a process under a subordinate id and watch it fail.
+- **Time the real jobs before moving them,** side by side, on the commit a hosted run just tested, and compare the counts (passed, skipped, assertions), not just green. Identical counts are the evidence that nothing was silently skipped.
+- **Order:** build and probe both machines on a throwaway branch, move the test jobs, watch a day, then move the review jobs. Going back is one commit.
+
+**What it cost in the reference system, so you can decide:** under twenty dollars a month for both machines, against a metered bill that had passed ten dollars a day; test jobs about 1.5 times slower per job on cheap shared cores; one job of each kind at a time, so a busy hour queues.
+
+**What bit, all found by running it:**
+- A rootless daemon with no per-user service manager picks a cgroup driver that has no slice to use, and every container fails to start. Start it with the plain cgroupfs driver.
+- Hiding other users' processes from a slot (`ProtectProc=invisible`) hides PID 1 too, and the runner reads `/proc/1/cgroup` to set up service containers. That is why nothing secret may be an argument.
+- The hosted image is an undeclared dependency. Tests shelled out to a linter and a database client that the hosted image happens to carry; on a bare machine they failed. List the tools, install them, and have the probe check for each.
+- The registration token could not read what the monitor was first written against. It had the two permissions the design fixed and no more, so "what is main's head?" answered 403. Read the change from what the token can read (a succeeded merge job, a deploy run created for main) rather than widen the token.
+- Runs for main queue behind each other, so the deploy of an older merge can start after a newer merge. Judge "was this change deployed" by the run **created for it**, never by which deploy started later.
+- A pull request can change which runner a job uses, because the workflow file comes from the PR head and a label is not a boundary. The control is the courier refusing every change to CI config (§2).
+- Once a monitor hands a slot its next runner within seconds, a slot is never idle, so the root-side probe needs the monitor stopped first.
+- Unattended security updates should reboot only in a fixed window. A job running then fails as "runner lost".
+
 ---
 
 ## Part 2 — The rebuild roadmap
@@ -216,6 +265,7 @@ Each phase has an exit test. Don't start the next phase until it passes.
 | 7 | Driver loop | Suite green, with every control killed by a mutant. Live smoke as root: isolation read back from the unit, STOP kills a running pass, and **a loop restart mid-pass leaves exactly one pass**. The usage-limit classifier passes against the vendor's **current** limit message (read it from the installed CLI), and a test shows the old classifier failing it. |
 | 7b | Reports page (§7) | The replay reads RED on exactly the incident days. Each check is mutated red. The page is checked in a browser against real host output in every state: normal, no summary, stale and missing. |
 | 8 | Hand-over | The interactive session stands down (nothing uncommitted), the loop's first pass picks correctly, and the first PR merges through the gate. |
+| 9 (optional) | CI on your own machines (§10), only if the metered bill or its ceiling is in the way | Both probes green on real jobs, and the root-side probe red against planted leftovers. The real test jobs green side by side with counts identical to a hosted run of the same commit. From the test machine, the gate machine's SSH port times out. The monitor's alerts replayed over real past records fire on the known incidents and nowhere else. |
 
 ---
 
@@ -259,7 +309,7 @@ Each lesson cost something real to learn.
 25. **Use the scheduler's own calendar, never a copied holiday list.** A hard-coded list was right for one year and wrong forever after.
 26. **Keep the alarm independent of what it watches.** The health snapshot imported the same module as the daily report, so one broken import would have silenced both. Prove it with a subprocess test that breaks the import.
 27. **Edit live scripts atomically.** A timer that fires during a slow edit runs half a file.
-28. **CI spend caps stop deploys silently.** When the code host's Actions budget ran out, merges kept landing and nothing deployed. Watch deploy lag, not just merges.
+28. **CI spend caps stop deploys silently.** When the code host's Actions budget ran out, merges kept landing and nothing deployed. Watch deploy lag, not just merges. Moving the heavy jobs to your own machines (§10) removes most of the bill; it does not remove the need for the alert, because deploy and merge stay metered.
 29. **One-off scripts that rewrite config are landmines.** Delete them, or quarantine them, once their job is done.
 30. **An alert must carry the cause, not a guess at it.** The courier labelled every rejected push "non-fast-forward" because it matched only the word `rejected`. A fix branch that had never existed on the code host was reported that way, the real reason was never recorded, and a refusal is final for that commit, so the fix stalled with nothing to act on. Pass the tool's own error text through; a label is a claim and needs the same evidence as any other.
 31. **A merge can land while the author is still working.** The gate merges the head it reviewed; an agent that keeps polishing pushes a commit seconds later, and a courier that refuses a merged PR drops it. Holding the branch until the pass ends looked like the fix and was wrong: the agent iterates with the reviewer inside one pass, so it would have waited for a PR that never appears. Read how a pass actually runs before adding a hold. What works is to forward late commits as a follow-up PR, and to tell "merged" apart from "closed by the owner", which still stays closed.
@@ -273,6 +323,18 @@ Each lesson cost something real to learn.
 36. **Say who does what, precisely.** An assistant session isn't an operator. Escalation goes to the human's phone. One-time human actions (a merge that removes their key, a browser login, provisioning a secret) are named and batched.
 37. **When the human says "don't ask me", build the thing that makes asking unnecessary.** Decisions move to the agents with a recorded rationale. The human keeps the stop switch, spending money and parked items.
 38. **A code host reports its own failures in the same words as a refusal.** A push that hit the host's server error came back as "remote rejected", and a courier that treated the word as final marked the branch handled and never forwarded it. The work sat for two hours with one alert that read like a policy decision. Classify by the reason, retry the host's faults, and test with the real error text.
+
+### From the first weeks unattended
+
+39. **A green run that produced nothing is an outage.** A daily scan exited 0 and confirmed nothing for days: a vendor's free tier had stopped returning one calendar field, and every candidate was refused as "cannot be checked". The job, its liveness ping and the report were all green. Alert on what a job produced.
+40. **Take public facts from whoever publishes them, and check their shape.** The missing field was a public calendar. It now comes from the publishers' own pages and feeds, with a check on the shape of what was parsed (the expected number of entries per year, no gap longer than the known maximum). A page redesign then fails loudly instead of yielding a short list. Plan for the day the source hasn't published next year yet, and decide beforehand how loud that should be.
+41. **A constraint that exists only in the production database is tested only in production.** The in-memory test database had no check constraints, so a row the real database rejects passed every test and failed on the first live run. Put anything that touches a constraint in the CI job with the real database engine.
+42. **A check that runs only after the merge fails where nobody is looking.** A bookkeeping job that runs on main, and doesn't block deploy, was red for hours after a PR left a pinned count one short. Either run its strict arm on the PR, or alert on it. A red run nobody is told about is decoration.
+43. **Find out what a credential can read before building on an endpoint.** The monitor's first version asked for the head commit with a token that could not read commits. It was caught only by calling each endpoint with the real token and reading the status codes. A test now fails if the script calls anything outside what the token is scoped to.
+44. **Tie an effect to the cause it was for.** "A deploy started after the merge" is not "the merge was deployed" when runs queue. The same mistake, in another form, is judging a day by any failed run rather than its last one.
+45. **Replay a new alert over real history before trusting it.** Each rule was run against the code host's actual records at moments before, during and after two real incidents, and swept across a normal period. That found the rule above, and it is what turns a threshold from a guess into a measurement.
+46. **Two writers that both allocate identifiers will collide.** The operator and the loop each picked "the next free number" for a work file and twice chose the same one. Allocate from one place, or make the collision a failed check rather than a silent overwrite.
+47. **A new probe's failures are a mix of its own bugs and real ones.** The isolation probe's first red was its own (a file search that exits non-zero on a denied directory, with no message). The next two were real: containers that could not start, and a setting that broke service containers. Give the probe a trap that names the failing line, and read each failure before deciding which kind it is.
 
 ---
 
@@ -292,6 +354,9 @@ Each lesson cost something real to learn.
 - [ ] The usage-limit handler matches the vendor's current message, and the loop resumes on its own after the reset.
 - [ ] The human has a Reports page that says, without being asked, whether today was fine.
 - [ ] Settings that must hold (attribution, hooks, permissions) are proven with a throwaway run, not trusted from prose.
+- [ ] A refused CI start, a change to main with no deploy, and a job stuck waiting for a runner each alert a phone.
+- [ ] Every job reports what it produced, and each external data feed has its own check.
+- [ ] If CI runs on your own machines (§10): both probes pass, deploy and merge are pinned to hosted runners by a test, and no secret appears in any process's arguments.
 
 ## Part 5 — Known gaps (be honest about them)
 
@@ -300,5 +365,7 @@ Each lesson cost something real to learn.
 - **Branch naming by prompt:** a pass that ignores its branch prefix creates an untracked PR. It's still reviewed, and bounded by the daily cap.
 - **Egress:** a pass can reach the internet, so a hijacked pass could exfiltrate its token. Consider an egress allowlist.
 - **Usage visibility:** a headless token may not be able to read the subscription's usage percentage. The human reads it with `/usage` while signed into the agent account.
-- **Version the host scripts.** In the reference system, `loop.sh`, `pass.sh` and `courier.sh` lived only on the host, so a disk loss would have erased them. Keep them in the project repo with an installer from day one.
+- **Version the host scripts.** In the reference system, `loop.sh`, `pass.sh` and `courier.sh` lived only on the host, so a disk loss would have erased them. Keep them in the project repo with an installer from day one. The same goes for the courier's test harness.
+- **Own runners (§10), if you use them:** two slots on one machine share `/dev/shm` and can read each other's process arguments; one job of each kind runs at a time, so throughput is bounded by the slowest job; the alert thresholds were set from one day of traffic and should be re-measured after a busy week.
+- **Transient retries are silent.** A push that keeps hitting a code-host fault is retried every minute with no alert. Add a count and alert past a limit.
 - **The usage-limit pause had not yet been exercised live** in the reference system when this was written. Check its first real occurrence in the loop's log.

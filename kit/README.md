@@ -45,4 +45,6 @@ They're versioned and tested with the code they guard. FOUNDATIONS describes eac
 - **Alert queue and deterministic push-notification drain (§7),** with delivery history.
 - **Remote Control session units,** if the owner wants a live session on the host.
 - **The Reports page (§7):** daily report collector, health snapshot, optional AI summary, and the read-only page.
+- **CI runner machines (§10, optional):** the installer, the per-slot unit with its prepare, run and wipe scripts, the config receiver, the gate machine's monitor, both probes, and a test that pins every job's machine.
+- **The courier's harness (§2):** a fake code host and one scenario per rule, kept beside the script it tests.
 - **A project runbook** for the host: where each piece lives, its knobs, and its operating procedures.
