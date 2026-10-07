@@ -42,6 +42,7 @@ refuse() { log "refused $1: $2"; notify "courier: refused $1: $2"; }
 # Whole-run failures alert once per kind, not once a minute; a clean run clears them.
 fatal() { log "$2"; if [ ! -e "$STATE/.fatal-$1" ]; then notify "courier: $2"; : > "$STATE/.fatal-$1"; fi; exit 1; }
 # Network calls get a ceiling, so a hang cannot hold the lock and silently stall every later run.
+SERVER_FAULT='Internal Server Error|Service Unavailable|Bad Gateway|Gateway Time-?out'
 net() { if command -v timeout >/dev/null; then timeout 60 "$@"; else "$@"; fi; }
 # One state file per branch records the sha last acted on. An unchanged branch is skipped without
 # an API call or an alert, so a stuck branch neither spams ntfy nor burns the GitHub rate limit.
@@ -191,10 +192,12 @@ while read -r name sha <&3; do
     fi
 
     # Explicit refspec, never a wildcard or mirror, never --force.
-    # Only a genuine rejection is final; a timeout or a GitHub error is retried next run.
+    # Only a genuine rejection is final; a timeout or a GitHub error is retried next run. GitHub
+    # reports its own failures as a rejection too ("! [remote rejected] ... (Internal Server
+    # Error)"), so the word alone does not make one.
     if ! perr=$(net git "${CRED[@]}" -C "$WORK" push -q "$REMOTE" "refs/courier/${name}:refs/heads/${target}" 2>&1); then
         perr=$(scrub "$perr")
-        if grep -q 'rejected' <<<"$perr"; then
+        if grep -q 'rejected' <<<"$perr" && ! grep -Eqi "$SERVER_FAULT" <<<"$perr"; then
             # The reason is on git's "! [...]" line and the remote's own "remote:" lines; the alert
             # carries them, because a refusal that does not say why cannot be acted on.
             why=$(grep -E '^ *! \[|^remote:' <<<"$perr" | tr -s ' \n' ' ' | sed -E 's/^ +| +$//g' | cut -c1-300) || why=""

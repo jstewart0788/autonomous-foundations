@@ -272,6 +272,7 @@ Each lesson cost something real to learn.
 35. **Validate by driving the real thing.** Every serious defect was found by running it: the safe.directory refusal, the private `/tmp` hiding a marker, a stale status file, a counter file colliding with a directory name. None of them showed up by reading the code.
 36. **Say who does what, precisely.** An assistant session isn't an operator. Escalation goes to the human's phone. One-time human actions (a merge that removes their key, a browser login, provisioning a secret) are named and batched.
 37. **When the human says "don't ask me", build the thing that makes asking unnecessary.** Decisions move to the agents with a recorded rationale. The human keeps the stop switch, spending money and parked items.
+38. **A code host reports its own failures in the same words as a refusal.** A push that hit the host's server error came back as "remote rejected", and a courier that treated the word as final marked the branch handled and never forwarded it. The work sat for two hours with one alert that read like a policy decision. Classify by the reason, retry the host's faults, and test with the real error text.
 
 ---
 
