@@ -13,6 +13,7 @@ These are working templates for the host side of the system: the driver loop, th
 | `courier.sh` | `/opt/courier/courier.sh` | The only holder of the code-host token: forwards `agent/*` branches, opens PRs, and writes the status files the loop and any reporting read (FOUNDATIONS §2) |
 | `tests/harness.py`, `tests/bin/` | not installed | Runs `courier.sh` as shipped against a fake code host and a local bare repo, one scenario per rule. `python3 kit/tests/harness.py` |
 | `tests/mutants.py` | not installed | Breaks `courier.sh` one rule at a time and fails unless the harness notices each. Run both before installing a changed courier |
+| `tests/loop_harness.py`, `tests/shim/` | not installed | Runs `loop.sh` as shipped, through its `LOOP_*` overrides, against a fake status file, pass and alerter: a conflicting PR is set aside and rebuilt once, a failed rebuild is retried, and a PR that is mergeable, unknown or already parked is left alone. `python3 tests/loop_harness.py ../loop.sh`. |
 | `etc/conduct.md` | `/etc/agent/conduct.md` | Rules appended to every pass's system prompt. Root-owned, so a pass can't change it |
 | `etc/loop.conf` | `/etc/agent/loop.conf` | Knobs the loop re-reads every cycle: `DAILY_PASSES`, `WEEKLY_COST` |
 | `etc/pass.gitconfig` | `/etc/agent/pass.gitconfig` | The pass's only git config: `safe.directory` for the bare repo, hooks off |

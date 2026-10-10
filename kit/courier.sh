@@ -242,10 +242,12 @@ done 3<<<"$refs"
 # The agent has no GitHub access, so this file is how it sees its PRs: state, and the bot's last
 # comment and review (which carry the verdict, the findings and whether test/test-db were green).
 # The token has no Checks permission, so check results are not queried directly.
+# `mergeable` is carried because a PR that conflicts with main gets no checks and no review: without
+# it the loop cannot tell a PR nobody has reviewed yet from one nobody ever will.
 # Refreshed every run; a failed refresh leaves the old file.
 if pr_status=$(net gh pr list --repo "$REPO" --state all --limit 100 \
-        --json number,headRefName,state,isDraft,url,comments,reviews \
-        --jq '[.[] | select(.headRefName | startswith("agent/")) | {number, branch: .headRefName, state, isDraft, url,
+        --json number,headRefName,state,isDraft,url,mergeable,comments,reviews \
+        --jq '[.[] | select(.headRefName | startswith("agent/")) | {number, branch: .headRefName, state, isDraft, url, mergeable,
                last_comment: (((.comments | last) // {}).body // "" | .[0:4000]),
                last_review: (((.reviews | map(select(.body != "")) | last) // {}).body // "" | .[0:4000])}]'); then
     # Inline-only reviews. A review posted with inline comments and an empty body is dropped by the

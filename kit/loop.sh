@@ -83,6 +83,9 @@ for p in sorted(prs, key=lambda p: p["number"]):
         print(p["number"], p["branch"])
     elif what == "parked-branches" and p["state"] == "OPEN" and str(p["number"]) in parked:
         print(p["branch"])
+    elif what == "conflicting" and p["state"] == "OPEN" and str(p["number"]) not in parked \
+            and p.get("mergeable") == "CONFLICTING":
+        print(p["number"])
 EOF
 }
 ref() { git -c safe.directory="$ORIGIN" --git-dir="$ORIGIN" rev-parse -q --verify "refs/heads/$1" 2>/dev/null || echo none; }
@@ -184,6 +187,15 @@ while :; do
     open=$(prs open); pr=${open%% *}; branch=${open#* }; branch=${branch%%$'\n'*}
     [ "$pr" = "$(get stall_pr x)" ] || { put stall_pr "${pr:-none}"; put stall_since "$(date +%s)"; }
 
+    # A PR that conflicts with main gets no checks and no review, so it never produces an event and
+    # would sit until the stall timer. A pushed branch is never rebased, so the conflict is final:
+    # set the PR aside now and have the next pass rebuild its work on a new branch.
+    if [ -n "$pr" ] && prs conflicting | grep -qx "$pr"; then
+        put rebuild "$pr $branch"
+        park "$pr" "it conflicts with main and its work is being rebuilt on a new branch; close #$pr"
+        continue
+    fi
+
     failures=$(get failures)
     if (( failures > 0 )); then
         (( $(date +%s) < $(get retry_at) )) && { sleep "$POLL"; continue; }
@@ -194,6 +206,8 @@ while :; do
         reason="first run"
     elif new=$(comm -13 <(sort "$STATE/seen") <(printf '%s\n' "$now" | sort)) && [ -n "$new" ]; then
         reason="event: $(echo "$new" | tr '\n' ' ')"; put stall_since "$(date +%s)"
+    elif [ -z "$pr" ] && [ -s "$STATE/rebuild" ]; then
+        reason="rebuild of the conflicting PR #$(cut -d' ' -f1 "$STATE/rebuild")"
     elif [ -n "$pr" ] && (( $(date +%s) - $(get stall_since) > STALL )); then
         park "$pr" "no review activity for $(( STALL / 3600 )) h"; continue
     elif [ -z "$pr" ] && (( $(date +%s) - $(get last_pass) > IDLE_NUDGE )); then
@@ -222,6 +236,12 @@ while :; do
 
 Agent PR #$pr ($branch) is open. Read its last comment and last review in prs.json. If they report a HIGH or CRITICAL finding, fix it as new commits on $branch and push (never rebase a pushed branch). If there is nothing to fix, stop without starting any other work."
         mode="fix #$pr"
+    elif [ -s "$STATE/rebuild" ]; then
+        read -r rpr rbranch < "$STATE/rebuild"
+        prompt="$COMMON
+
+Loop PR #$rpr ($rbranch) cannot merge: main moved under it and the two conflict, so it was set aside. Its work is not dropped. Rebuild it on a new branch from current main: fetch $rbranch from origin and carry its changes over. Where it claimed a work number that main has since given to another file, take the next free number and rename its files and tests to match. Run its tests, then /ship under a new branch name. Do nothing else in this pass."
+        mode="rebuild #$rpr"
     else
         parked=$(prs parked-branches | tr '\n' ' ')
         prompt="$COMMON
@@ -245,7 +265,7 @@ No loop PR is open. Run /next and carry the pick as far as you can in this pass:
     [ -n "$pr" ] && [ "$(ref "$branch")" != "$before" ] && put "rounds-$pr" $(( $(get "rounds-$pr") + 1 ))
 
     case $outcome in
-        ok)      put failures 0; hc "" ;;
+        ok)      put failures 0; hc ""; [[ $mode == rebuild* ]] && rm -f "$STATE/rebuild" ;;
         stopped) ;;
         limit:*) secs=${outcome#limit:}; put limit_until $(( $(date +%s) + secs )); rm -f "$STATE/seen"
                  once limit "$(date -u +%F)" && alert WARN "usage limit hit; rechecking every $(( secs / 60 )) min until it resets" ;;

@@ -1,0 +1,4 @@
+#!/bin/bash
+# GNU `stat -c %Y FILE` for a host whose stat is BSD.
+[ "$1" = -c ] && [ "$2" = %Y ] && exec python3 -c 'import os,sys; print(int(os.path.getmtime(sys.argv[1])))' "$3"
+exec /usr/bin/stat "$@"
