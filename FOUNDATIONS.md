@@ -107,8 +107,12 @@ Build the nine in this order. Each one is useless or dangerous without the ones 
   - The implementation PR may only remove those markers.
   - A spec can't be edited to fit the fix.
   - Concurrency, database and integration criteria are proven in the CI job that has a real database.
-- **What interrupts current work:** only a new finding that is critical, on the money path, wrong data on a live read path, a live secret, or a red liveness check.
-- **Legacy findings** get one slice in four.
+- **What interrupts current work:** only a new finding that can happen in production as it is configured today, and that is critical, on the money path, wrong data on a live read path, a live secret, or a red liveness check.
+  - Every finding states its reach: `live` (names the production entry point and the setting, checked by CI against the real configuration) or `dormant` (names the one switch that closes every route to it).
+  - A dormant finding is real and waits its turn. CI refuses a change that turns its switch on while it is open.
+  - A defect in a check that keeps a switch off is live, because the check runs today.
+- **The picker shares time.** Critical findings go first. After two interrupts in a row it tries roadmap and queued work before a third. Ordinary open findings and legacy findings get one slice in four, skipping anything blocked. Define "closed" and "oldest" so a fresh pass computes them from files alone.
+- **Noticing is not doing.** A defect noticed during a slice is filed and left for the picker; it is never specced in the same PR. One finding per missing check, not one per argument or call site. A defect caused by a fix from the last week reopens that fix's finding.
 - **Link work to the roadmap mechanically.** Each item in a version's order of work carries a stable ID (`[id: v0.6-slug]`, never renumbered). Each work file names the item it serves in front matter (`roadmap: v0.6-slug`, or `legacy` or `none`), and a CI test fails any work file whose value is missing or doesn't resolve. That makes "how much of this version is left" a count, not a guess.
 - **Closure evidence:** a merged SHA. For a recurring process, also a dated runtime datum. If the path is switched off in production, the status says so (`closed-pending-runtime-verification`) rather than overclaiming.
 
@@ -342,6 +346,12 @@ Each lesson cost something real to learn.
 50. **The silence alarm earns its keep.** The monitor pings liveness only after every check has run. When it crashed, nothing in it could have alerted; the missing ping did, within its grace period. Put the heartbeat last, behind everything it vouches for.
 51. **Your own maintenance is the most common cause of a page.** A planned one-minute reboot paged the human, who had to ask what it was. Before taking down anything a monitor watches, say so and name the alert that may fire; better, make a planned outage of that length not fire it.
 52. **Clear out what you created, and look before you do.** Throwaway branches held the only copy of a workflow the rebuild procedure depends on. It was found by reading what each branch contained that the main branch did not, immediately before deleting it.
+53. **Ask whether the defect can happen, before asking how bad it would be.** The interrupt rule said "on the money path" and nothing about whether the path could run. With the product's risky actions switched off behind three gates, the agent spent four days fixing defects in code that could not execute: of 32 findings, 5 were reachable, 14 sat behind a switch that was off, 10 needed an input nothing could produce, and 3 were its own fixes from hours earlier. None was invented; the ranking was wrong.
+54. **An agent that files its own work will chain it.** Each fix PR also specced the defect found beside it, flagged urgent, so the picker always had an interrupt and the roadmap never got a turn. One missing validation block became five findings, an argument at a time. Separate noticing from doing, bound each run to one outcome, and cap self-raised urgency.
+55. **A healthy report can hide a stopped roadmap.** Merges, jobs and data were all green while the in-flight version stood still for a week on steps only an operator could run. Report roadmap movement as its own check: no merge on the in-flight version that day, or no new high in finished items for several reports, is red and pages. Use a high-water mark so reopening and re-closing work cannot reset it.
+56. **Every picking rule needs a mechanism a fresh pass can compute.** A first draft of the rules above had a cap that could not be evaluated (sixteen files shared one closing date), a queue a blocked item could jam, and a "reopen" with no stated status. Each read fine and none worked. Walk the procedure through concrete states before shipping it.
+57. **A pull request that conflicts makes no noise.** The code host runs no checks on it, so a loop that waits for a check or a review waits for nothing until its stall timer fires; hours go by. It happens whenever two authors claim the next work number. Treat "conflicting" as an event that starts a rebase pass, and do not file work by hand while the loop is mid-pass.
+58. **Operator steps need an owner and a trigger.** Work that ends in "run this against production" was assigned to an operator session that nobody was assigned to start. Record owed operator steps where the report can list them.
 
 ---
 
@@ -375,5 +385,7 @@ Each lesson cost something real to learn.
 - **Usage visibility:** a headless token may not be able to read the subscription's usage percentage. The human reads it with `/usage` while signed into the agent account.
 - **Version the host scripts.** In the reference system, `loop.sh`, `pass.sh` and `courier.sh` lived only on the host, so a disk loss would have erased them. Keep them in the project repo with an installer from day one.
 - **Own runners (§10), if you use them:** two slots on one machine share `/dev/shm` and can read each other's process arguments; one job of each kind runs at a time, so throughput is bounded by the slowest job; the alert thresholds were set from one day of traffic and should be re-measured after a busy week; the drain-before-reboot path has only been exercised with idle slots.
+- **A conflicting pull request is silent** (lesson 57): in the reference system the loop still waits out its full stall timer on one.
+- **A `live` label can be wrong.** The entry point a finding names is free text; only the setting is checked. The interrupt cap bounds the damage.
 - **Transient retries are silent.** A push that keeps hitting a code-host fault is retried every minute with no alert. Add a count and alert past a limit.
 - **The usage-limit pause had not yet been exercised live** in the reference system when this was written. Check its first real occurrence in the loop's log.
