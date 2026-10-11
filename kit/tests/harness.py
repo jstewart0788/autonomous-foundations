@@ -63,6 +63,14 @@ class Box:
         self.g("commit", "-q", "-m", f"{branch}: {fname}")
         return self.g("rev-parse", "HEAD")
 
+    def empty_commit(self, branch, start="main"):
+        if self.g("rev-parse", "-q", "--verify", branch, check=False):
+            self.g("checkout", "-q", branch)
+        else:
+            self.g("checkout", "-q", "-b", branch, start)
+        self.g("commit", "-q", "--allow-empty", "-m", f"{branch}: a note, no files")
+        return self.g("rev-parse", "HEAD")
+
     def to_local(self, branch, as_name=None, force=False):
         self.g("push", "-q", *(["-f"] if force else []), str(self.local),
                f"{branch}:refs/heads/{as_name or 'agent/' + branch}")
@@ -334,6 +342,40 @@ def s_late_of_a_late_branch_keeps_the_root(b):
     b.run()
     assert b.remote_ref(f"{X}-late2") == more, (b.remote_branches(), b.log)
     assert f"{X}-late-late" not in b.remote_branches()
+
+
+def s_late_commit_that_changes_no_file_opens_no_pr(b):
+    b.commit("loop-x", "a.txt")
+    b.merge_into_main("loop-x")
+    b.pr(X, 1, "MERGED")
+    note = b.empty_commit("loop-x")
+    b.to_local("loop-x")
+    b.run()
+    assert b.remote_branches() == [] and b.prs_of(f"{X}-late") == [], (b.remote_branches(), b.log)
+    assert b.local_ref(f"{X}-late") == "" and b.notes() == [], b.notes()
+    assert b.done(X) == note
+    real = b.commit("loop-x", "late.txt")
+    b.to_local("loop-x")
+    b.run()
+    assert b.remote_ref(f"{X}-late") == real, b.log
+    assert b.prs_of(f"{X}-late") == [["2", "OPEN"]]
+
+
+def s_new_branch_that_changes_no_file_opens_no_pr(b):
+    note = b.empty_commit("loop-new")
+    b.to_local("loop-new")
+    b.run()
+    assert b.remote_branches() == [] and b.prs_of("agent/loop-new") == [], b.log
+    assert b.done("agent/loop-new") == note and b.notes() == []
+
+
+def s_commits_that_cancel_out_open_no_pr(b):
+    b.commit("loop-new", "n.txt")
+    b.g("rm", "-q", "n.txt")
+    b.g("commit", "-q", "-m", "loop-new: take it back")
+    b.to_local("loop-new")
+    b.run()
+    assert b.remote_branches() == [] and b.prs_of("agent/loop-new") == [], b.log
 
 
 def s_ordinary_branches_unchanged(b):

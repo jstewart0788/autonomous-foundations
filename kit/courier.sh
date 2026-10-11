@@ -156,8 +156,15 @@ while read -r name sha <&3; do
     sha=$(git -C "$WORK" rev-parse "refs/courier/${name}")
     base=$(git -C "$WORK" merge-base refs/remotes/origin/main "refs/courier/${name}") || {
         refuse "$name" "no common history with main"; done_with "$name" "$sha"; continue; }
-    # Relies on main taking PRs as merge commits: the merged head is then an ancestor of main.
-    if [ -n "$late_of" ] && [ "$base" = "$sha" ]; then done_with "$name" "$sha"; continue; fi
+    # A branch whose tree equals its base has nothing to merge: a merged head with nothing after
+    # it (main takes PRs as merge commits, so that head is an ancestor of main), or commits that
+    # change no file. Such a PR would list no files, which the merge gate cannot classify, and
+    # the loop would wait on it until it is parked.
+    same=0; git -C "$WORK" diff --quiet "$base" "refs/courier/${name}" || same=$?
+    if [ "$same" -eq 0 ]; then
+        log "dropped $name @ ${sha:0:12}: it changes no files"; done_with "$name" "$sha"; continue
+    fi
+    [ "$same" -eq 1 ] || { refuse "$name" "could not compare with its base"; continue; }
 
     # Linear history only: git log, format-patch and gitleaks do not reliably show what a merge
     # commit itself changes. The agent rebases instead.
