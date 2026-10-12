@@ -71,6 +71,7 @@ Build the nine in this order. Each one is useless or dangerous without the ones 
   - state files record the last SHA acted on for each branch, so a stuck branch isn't retried or alerted on every minute;
   - a PR the owner closed stays closed;
   - commits that land after a PR **merged** are not dropped: they go out as a follow-up branch (`<branch>-late`) through every check, with their own PR, and the follow-up branch is written to the local repo so the agent can keep working on it;
+  - **a branch whose tree equals its base is dropped, not forwarded.** A merged head with nothing after it, or commits that change no file, would open a PR that lists no files. The gate cannot classify that, and the loop waits on it until the stall timer. Compare the two trees, not the commit lists, so commits that cancel out are caught too;
   - a refusal says why: a rejected push carries the code host's own reason (git's `! [...]` line and any `remote:` lines, token scrubbed) in the alert, and the full output in the log;
   - **the code host's own faults are retried, not refused.** A server error on a push comes back from git as `! [remote rejected] … (Internal Server Error)`. Only a rejection whose reason is not a server fault is final; the rest are tried again on the next run without an alert.
 - Test it with a harness that runs the real script against a fake code host, plus one mutant per rule. Feed it the error text the code host really sent, saved from the incident, and include a branch that only changes which runner a CI job uses: it must end in the outbox (§10).
@@ -152,7 +153,7 @@ Build the nine in this order. Each one is useless or dangerous without the ones 
   - usage limit: detected only from a failed pass's error output, then pause and recheck until it resets. Claude Code 2.x words it `You've hit your session limit · resets 3pm (…)` (also weekly). There is no machine-readable reset time in `-p` output, so recheck every 15 minutes: a blocked attempt fails immediately at no cost. Alert at most once a day for it, never once per recheck;
   - in-flight marker: a pass killed along with the loop counts as a failure and its events are restored;
   - a stopped pass keeps its events;
-  - idle nudge: with no open PR, run a pass after N hours.
+  - idle nudge: with no open PR, run a pass after N hours. This is also the only thing that notices work filed by anyone other than the loop, so its length is the longest an operator-filed item can wait (lesson 60).
 - **One fixed unit name** for passes, so systemd itself refuses a second concurrent pass. The pass is bound to the loop service, and orphans are stopped at loop start.
 - **STOP file,** checked before and during a pass.
 - **The loop is the only scheduler.** With no cap and nothing to do, it idles and runs an idle nudge every N hours. It doesn't exit when the roadmap is done; the human stops it.
@@ -202,6 +203,7 @@ Build the nine in this order. Each one is useless or dangerous without the ones 
 - **Escalation goes to the human's phone,** never to a named assistant session. A personal session exists only while it's open.
 - **One-time human actions are named and batched:** buying the agent's subscription, approving browser logins (§9), setting up domain email, creating vendor OAuth apps, and running any command the operator session is refused (below).
 - **The operator session's own guardrails will refuse some edits:** for example, removing an alert or changing a live control script on the host. Don't route around that. Hand the human the exact command to run with `!`, written to be safe as pasted. `set -e` plus `diff` exits on the first difference, so don't put `diff` before the `mv` it was meant to preview.
+- **Those refusals are judgements, not fixed rules.** The same command can run one day and be refused the next, and saying "yes" in the conversation does not unlock it. When the human is remote and cannot paste a command, the answer is a single narrow allow rule for that one command, added on the human's explicit instruction and never on the session's own initiative. The limits that matter (a spending cap, a kill switch) must live in the tool being run, so the rule only skips the prompt.
 
 #### 9. Accounts and credentials: the agent is a separate identity
 
@@ -353,6 +355,25 @@ Each lesson cost something real to learn.
 57. **A pull request that conflicts makes no noise.** The code host runs no checks on it, so a loop that waits for a check or a review waits for nothing until its stall timer fires; hours go by. It happens whenever two authors claim the next work number. Have the courier record whether each PR is mergeable; when the loop's open PR conflicts, set it aside at once and tell the next pass to rebuild its work on a new branch, saying explicitly that the work is not dropped (a pass told only that a branch was "set aside" silently abandoned a finding). And do not file work by hand while the loop is mid-pass.
 58. **Operator steps need an owner and a trigger.** Work that ends in "run this against production" was assigned to an operator session that nobody was assigned to start. Record owed operator steps where the report can list them.
 
+### From the first operator-run jobs
+
+59. **A pull request with nothing in it stalls everything behind it.** The courier forwarded commits that landed after a merge even when they changed no file. The empty PR could not be classified, got no review, and held the one-PR-at-a-time slot until the stall timer parked it, twice in a day, for hours each time. Anything that opens work automatically must first check there is work in it.
+60. **A loop that wakes on its own events is deaf to everyone else's.** Four defects filed by the operator merged and sat for hours, because a merge of someone else's PR is not an event and the idle nudge had just fired. If other authors can add to the queue, either wake on the queue changing or accept the idle period as the response time, and say which.
+61. **Where importance is not a field, order is the priority.** The urgent defect did not meet the interrupt rule, so the picker would have taken it last, by number. It went first only because it was given the lowest number. Know the picker's tie-break before filing several items at once, and file in the order you want them done.
+62. **The operator's pull requests need the same watching as the agent's.** Two operator PRs sat red for hours on a rule the loop had added the day before. Nothing alerted, because every status file and alert was scoped to the loop's branches. A red check on any open PR is worth one line in the report.
+63. **A test the gate cannot run is not a gate; it is an operator step.** One suite needs a data set only the operator's machine holds, so CI skips it. The loop fixed the defect it covers without being able to run it, and left its expected-failure marker in place. Name who runs every skipped suite and when, and treat "green" from a skip as no information.
+64. **An expected-failure marker hides whatever fails first.** A marker that accepts an assertion error also accepts the test's own precondition failing, so a vacuous fixture reads the same as the defect. Make preconditions a hard failure of a different kind, and run the test once with the marker off to see the real error.
+65. **Test with what the real caller sends, including the defaults it makes explicit.** The production launcher always passed a settings object, filled with default values. Every test passed none. The two paths diverged only when the object was present, so the suite was green and the first real run crashed after most of its cost was spent. Build at least one test through the real entry point.
+66. **Buy the cheap run first.** A reduced-size run of a paid job found that crash for about a tenth of the full price, and gave measured phase times to size the real cap from. It also showed that fixing only the visible symptom would have turned a crash into a wrong answer, which no amount of reading had.
+67. **A watchdog must ask whether the thing it watches is still alive.** The kill switch for paid jobs ended its watch on a result, a stall or the spending cap. A job that crashed produced none of those, so the watchdog reported "ok", kept counting money from the clock, and held the only run slot for two more hours. Ask the platform for the job's state on every tick; an unreadable state changes nothing.
+68. **A wait must be longer than the period of what it waits for.** The launcher gave the watchdog one minute to confirm and then cancelled; the watchdog ticked every five. A launch worked only when it happened to start just before a tick. Derive the wait from the period, in code, so changing one changes the other.
+69. **A spend estimate built from wall-clock time is not the bill.** The watchdog multiplied elapsed time by a deliberately high rate, which is right for a cap and wrong as a record: it showed four times the real cost of a job that had already stopped. Keep the conservative figure for the limit and reconcile against the billed line before quoting a cost.
+70. **A cache keyed on its inputs serves old answers after the rules change.** A stored intermediate result was keyed on the job's parameters and data, not on the code that computed it, so a run under rewritten rules would have loaded results the old rules produced. Put the identity of the producing code in the key, and list every module that shapes the output, not just the obvious ones.
+71. **A failed run's name is used up.** A retry under the same name was refused by the guard that stops two runs mixing their checkpoints, after paying for the start-up. That guard was right. Give every attempt a fresh name, or decide deliberately to clear the old state.
+72. **Check that the data exists before scoping work that needs it.** A roadmap item assumed fifteen years of an event history; production held five months, and the job that could backfill it covered a fraction of the names. One read-only count answered it in a minute, after the code had been built.
+73. **The agent executes the roadmap's words; the human should see the bill first.** "Record a result for each of five variants" became five full-price runs, when one proved the machinery and reduced runs exercised the rest for a quarter of the cost. Before the first paid step, put the plan to the human as what each dollar buys, and offer the cheaper plan that answers the same questions.
+74. **A fix needs evidence from after it shipped.** Two of the fixes above were confirmed within a day by the next real run: the launch armed first time, and the watchdog named the crash and released the slot in one tick. Until then they were closed "pending runtime evidence", which is the honest status for anything that only production can exercise.
+
 ---
 
 ## Part 4 — Checklist before going unattended
@@ -375,6 +396,9 @@ Each lesson cost something real to learn.
 - [ ] Every job reports what it produced, and each external data feed has its own check.
 - [ ] If CI runs on your own machines (§10): both probes pass, deploy and merge are pinned to hosted runners by a test, no secret appears in any process's arguments, and a machine reboots only when idle.
 - [ ] Every remote call a monitor makes has a test in which it fails, and its fixtures are as large as the real answers.
+- [ ] Every suite CI skips has a named runner and a trigger, and at least one test goes through the real entry point with the arguments it really sends.
+- [ ] Every paid job has a watchdog that checks the job is still running, a wait longer than the watchdog's period, a reduced-size run before the full one, and a cost reconciled against the bill.
+- [ ] Work filed by someone other than the loop has a known longest wait, and a red check on anyone's open PR is reported.
 
 ## Part 5 — Known gaps (be honest about them)
 
@@ -387,5 +411,7 @@ Each lesson cost something real to learn.
 - **Own runners (§10), if you use them:** two slots on one machine share `/dev/shm` and can read each other's process arguments; one job of each kind runs at a time, so throughput is bounded by the slowest job; the alert thresholds were set from one day of traffic and should be re-measured after a busy week; the drain-before-reboot path has only been exercised with idle slots.
 - **A conflicting pull request leaves an open PR behind** (lesson 57): the loop rebuilds the work on a new branch, but nothing closes the old PR. The parking alert asks the human to.
 - **A `live` label can be wrong.** The entry point a finding names is free text; only the setting is checked. The interrupt cap bounds the damage.
+- **The loop does not wake for work it did not file** (lesson 60). In the reference system an operator-filed item waits up to one idle period; nothing shortens that yet.
+- **Operator pull requests are unwatched** (lesson 62): status files and alerts cover only the loop's branches.
 - **Transient retries are silent.** A push that keeps hitting a code-host fault is retried every minute with no alert. Add a count and alert past a limit.
 - **The usage-limit pause had not yet been exercised live** in the reference system when this was written. Check its first real occurrence in the loop's log.
