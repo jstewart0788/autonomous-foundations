@@ -8,6 +8,7 @@ A blueprint for an AI coding agent that works a codebase continuously, merges it
   - lessons learned;
   - a checklist before going unattended;
   - known gaps.
+- **[WORKING_WITH_AGENTS.md](WORKING_WITH_AGENTS.md)** is the short version: eight sections of practices for running agents on a project, including agents that direct other agents.
 - **[kit/](kit/)** holds working templates for the host side: the driver loop, the per-pass runner, the courier, and their conduct file, config and systemd units. Change the placeholder names before use.
 
 The core idea: **an agent can't be trusted by instruction, only by mechanism.** Every property that matters is enforced by something the agent can't edit, and proven by breaking it on purpose.
