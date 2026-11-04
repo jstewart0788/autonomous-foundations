@@ -1,11 +1,13 @@
 #!/bin/bash
 # Fake gh: PR state lives in $FAKE/prs as "branch number STATE" lines.
-sub="$1 $2"; head=""; body=""; state=""
+sub="$1 $2"; head=""; body=""; state=""; json=""; comment=""; number=$3
 while [ $# -gt 0 ]; do
   case "$1" in
     --head) head=$2; shift ;;
     --body) body=$2; shift ;;
     --state) state=$2; shift ;;
+    --json) json=$2; shift ;;
+    --comment) comment=$2; shift ;;
   esac
   shift
 done
@@ -16,7 +18,35 @@ case "$sub" in
       awk -v h="$head" '$1==h {print $2" "$3}' "$FAKE/prs" 2>/dev/null
     elif [ "$state" = open ]; then
       awk '$3=="OPEN" && $1 ~ /^agent\/loop-/ {print $2}' "$FAKE/prs" 2>/dev/null
+    elif [ "$state" = all ] && [ -n "$json" ]; then
+      # The status listing, already in the shape the courier's --jq produces. `mergeable` comes
+      # from $FAKE/mergeable as "number VALUE" lines; a PR not listed there is MERGEABLE.
+      python3 - "$FAKE" <<'PY'
+import json, os, sys
+fake = sys.argv[1]
+mergeable = {}
+try:
+    mergeable = dict(l.split() for l in open(os.path.join(fake, "mergeable")).read().splitlines() if l.strip())
+except OSError:
+    pass
+out = []
+try:
+    rows = [l.split() for l in open(os.path.join(fake, "prs")).read().splitlines() if l.strip()]
+except OSError:
+    rows = []
+for head, n, state in rows:
+    if head.startswith("agent/"):
+        out.append({"number": int(n), "branch": head, "state": state, "isDraft": False,
+                    "url": f"https://example.invalid/pull/{n}", "mergeable": mergeable.get(n, "MERGEABLE"),
+                    "last_comment": "", "last_review": ""})
+print(json.dumps(out))
+PY
     else echo '[]'; fi
+    exit 0 ;;
+  "pr close")
+    grep -q " $number OPEN$" "$FAKE/prs" || exit 1
+    sed -i.bak "s/ $number OPEN$/ $number CLOSED/" "$FAKE/prs" && rm -f "$FAKE/prs.bak"
+    printf '%s %s\n' "$number" "$comment" >> "$FAKE/closed"
     exit 0 ;;
   "pr create")
     n=$(( $(awk '{print $2}' "$FAKE/prs" 2>/dev/null | sort -n | tail -1) + 1 ))
