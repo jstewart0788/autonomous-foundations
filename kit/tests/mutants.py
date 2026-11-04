@@ -34,6 +34,9 @@ M = [
  ("CI config is no longer a protected path", r"PROTECTED='^(\.github(/|$)|", r"PROTECTED='^(\.githubX(/|$)|"),
  ("a code-host server error is a final refusal", '''if grep -q 'rejected' <<<"$perr" && ! grep -Eqi "$SERVER_FAULT" <<<"$perr"; then''', '''if grep -q 'rejected' <<<"$perr"; then'''),
  ("no rejection is ever final", '''if grep -q 'rejected' <<<"$perr" && ! grep -Eqi "$SERVER_FAULT" <<<"$perr"; then''', '''if false; then'''),
+ ("a parked PR is closed whether or not it conflicts", 'if str(p["number"]) in parked and p.get("mergeable") == "CONFLICTING":', 'if str(p["number"]) in parked:'),
+ ("a conflicting PR is closed whether or not the loop parked it", 'if str(p["number"]) in parked and p.get("mergeable") == "CONFLICTING":', 'if p.get("mergeable") == "CONFLICTING":'),
+ ("a parked conflicting PR is closed before its successor exists", 'successors = [p["number"] for p in opens', 'successors = [0] + [p["number"] for p in opens'),
 ]
 tmp = os.path.join(HERE, "courier.mut.sh")
 

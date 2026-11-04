@@ -192,7 +192,7 @@ while :; do
     # set the PR aside now and have the next pass rebuild its work on a new branch.
     if [ -n "$pr" ] && prs conflicting | grep -qx "$pr"; then
         put rebuild "$pr $branch"
-        park "$pr" "it conflicts with main and its work is being rebuilt on a new branch; close #$pr"
+        park "$pr" "it conflicts with main and its work is being rebuilt on a new branch; the courier closes #$pr once the rebuilt PR is open"
         continue
     fi
 

@@ -7,6 +7,7 @@ nothing leaves the machine.
 usage: harness.py [COURIER] [scenario ...]   COURIER defaults to ../courier.sh
        prints PASS/FAIL per scenario and exits 1 on any FAIL
 """
+import json
 import os
 import shutil
 import subprocess
@@ -303,6 +304,33 @@ def s_held_behind_another_loop_pr(b):
     b.set_pr("agent/loop-other", "MERGED")
     b.run()
     assert b.remote_ref(f"{X}-late") == late, b.log
+
+
+def s_parked_conflicting_pr_is_closed_once_its_successor_is_open(b):
+    """The loop parks a PR that conflicts with main and rebuilds the work; the courier closes the
+    parked one naming the successor, and only then. A parked-but-mergeable PR (a stall park) and
+    a conflicting-but-not-parked PR are left alone."""
+    b.pr("agent/loop-old", 5, "OPEN")
+    b.pr("agent/loop-stalled", 8, "OPEN")
+    b.pr("agent/loop-unparked", 9, "OPEN")
+    (b.t / "fake" / "mergeable").write_text("5 CONFLICTING\n9 CONFLICTING\n")
+    (b.t / "parked").write_text("5\n8\n")
+    b.run()
+    assert b.prs_of("agent/loop-old") == [["5", "OPEN"]], "no successor yet: #5 stays open"
+    assert not (b.t / "fake" / "closed").exists(), b.log
+    b.pr("agent/loop-new", 6, "OPEN")
+    b.run()
+    assert b.prs_of("agent/loop-old") == [["5", "CLOSED"]], b.log
+    closed = (b.t / "fake" / "closed").read_text()
+    assert closed.startswith("5 ") and "#6" in closed, closed
+    assert b.prs_of("agent/loop-stalled") == [["8", "OPEN"]], "a stall park is not a conflict"
+    assert b.prs_of("agent/loop-unparked") == [["9", "OPEN"]], "the loop has not set #9 aside"
+    status = json.loads((b.t / "status" / "prs.json").read_text())
+    assert {p["number"]: p["state"] for p in status}[5] == "CLOSED", "prs.json shows the close this run"
+    assert "closed #5: superseded by #6" in b.log, b.log
+    n = closed.count("\n")
+    b.run()
+    assert (b.t / "fake" / "closed").read_text().count("\n") == n, "closed once, not every run"
 
 
 def s_listing_failure_is_retried(b):

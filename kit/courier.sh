@@ -278,6 +278,37 @@ for p in prs:
         p["last_review"] = text[:4000]
 print(json.dumps(prs))') && pr_status=$merged
     done
+    # A loop PR the loop parked as conflicting with main can never merge: a pushed branch is never
+    # rebased, and the loop rebuilds its work on a new branch. Once that successor is open, close
+    # the parked one naming it, so the owner is not asked to. Closing is final, so it needs both
+    # facts from this listing: in the loop's parked file AND still CONFLICTING on the host. The
+    # successor is an open loop PR the loop has not parked and that can merge.
+    for pair in $(printf '%s' "$pr_status" | PARKED="$PARKED" python3 -c 'import json, os, sys
+prs = json.load(sys.stdin)
+try:
+    parked = set(open(os.environ["PARKED"]).read().split())
+except OSError:
+    parked = set()
+opens = [p for p in prs if p["state"] == "OPEN" and p["branch"].startswith("agent/loop-")]
+successors = [p["number"] for p in opens
+              if str(p["number"]) not in parked and p.get("mergeable") != "CONFLICTING"]
+if successors:
+    for p in opens:
+        if str(p["number"]) in parked and p.get("mergeable") == "CONFLICTING":
+            print(f"{p["number"]}:{max(successors)}")'); do
+        old=${pair%%:*}; new=${pair#*:}
+        if net gh pr close "$old" --repo "$REPO" --comment "Closed by the courier: the loop parked this PR because its branch conflicts with main and is never rebased, and rebuilt the work on a new branch, #$new."; then
+            log "closed #$old: superseded by #$new"
+            pr_status=$(printf '%s' "$pr_status" | N="$old" python3 -c 'import json, os, sys
+prs = json.load(sys.stdin)
+for p in prs:
+    if p["number"] == int(os.environ["N"]):
+        p["state"] = "CLOSED"
+print(json.dumps(prs))') || true
+        else
+            log "could not close #$old (superseded by #$new); will retry"
+        fi
+    done
     printf '%s\n' "$pr_status" > "$STATUS/prs.json.tmp" && mv -f "$STATUS/prs.json.tmp" "$STATUS/prs.json" ||
         log "could not write $STATUS/prs.json"
 else
